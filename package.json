@@ -1,0 +1,16 @@
+{
+  "name": "react-ssr-stateful-hooks",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "node example"
+  },
+  "keywords": ["react", "hooks", "server side rendering"],
+  "author": "@davidmarkclem",
+  "license": "MIT",
+  "devDependencies": {
+    "react": "^16.8.6",
+    "react-dom": "^16.8.6"
+  }
+}
