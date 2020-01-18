@@ -4,9 +4,9 @@ const { createElement, useState } = require('react')
 
 const Component = () => {
   const [count, update ] = useState(0)
-  return createElement('div', null, [
+  return createElement('div', null, 
     createElement('span', null, 'count:' + count)
-  ])
+  )
 }
 
 var i = 100000;

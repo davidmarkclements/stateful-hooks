@@ -1,4 +1,4 @@
-// 'use strict'
+'use strict'
 const react = tryToLoad('react')
 const reactDomServer = tryToLoad('react-dom/server')
 const {
@@ -8,12 +8,6 @@ const {
 const { renderToString } = reactDomServer
 const map = new Map()
 const { prepareStackTrace, stackTraceLimit } = Error
-reactDomServer.renderToString = (element) => {
-  install()
-  const str = renderToString(element)
-  uninstall()
-  return str
-}
 
 function noop () {}
 const rsshDispatcher = {
@@ -29,6 +23,7 @@ const rsshDispatcher = {
   useEffect: noop,
   useDebugValue: noop
 }
+
 var reactDispatcher = null
 var dispatcher = null
 Object.defineProperty(internals.ReactCurrentDispatcher, 'current', {
@@ -90,27 +85,39 @@ function useReducerDispatcher (states, reducer) {
     `this.states[${current.index}] = this.reducer(this.states[${current.index}], action)`
   ).bind({ states, reducer })
 }
-function useMemoDispatcher (states) {
+
+function depCheckerDispatcher (states) {
   return Function( // eslint-disable-line
     'fn',
     'deps',
     `
+      this.updated = false
       const lastDeps = this.states[${current.index}]
       if (!('val' in this)) return (this.val = fn())
       if (deps.length !== lastDeps.length) {
         this.states[${current.index}] = deps
+        this.updated = true
         return (this.val = fn())
       }
       
       for (var i = 0; i < deps.length; i++) {
         if (!Object.is(deps[i], lastDeps[i])) {
           this.states[${current.index}] = deps
+          this.updated = true
           return (this.val = fn())
         }
       }
-      return this.val
+      return this
     `
   ).bind({ states })
+}
+
+function useMemoDispatcher (states) {
+  const dispatch = depCheckerDispatcher(states)
+  return (fn, deps) => {
+    const { val } = dispatch(fn, deps)
+    return val
+  }
 }
 function getState (initialState, makeDispatcher, opts = null) {
   let meta = map.get(current.rendering)
@@ -132,6 +139,7 @@ function getState (initialState, makeDispatcher, opts = null) {
   const state = meta.hooks.states[index]
   const dispatch = meta.hooks.dispatchers[index]
   current.index++
+
   return [state, dispatch]
 }
 
@@ -160,6 +168,11 @@ function useContext (context) {
   return reactDispatcher.useContext(context)
 }
 
+function useEffectSsr (fn, deps) {
+  const [ , getStatus ] = getState(deps, depCheckerDispatcher)
+  return getStatus(fn, deps) || {}
+}
+
 function inject () {
   const {
     useMemo,
@@ -167,8 +180,29 @@ function inject () {
     useRef,
     useState,
     useCallback,
-    useContext
+    useContext,
+    useEffect
   } = react
+
+  var useEffectEnabled = false
+  const useEffectCleanups = []
+  function _useEffect (...args) {
+    if (useEffectEnabled === false) {
+      return useEffect(...args)
+    }
+    useEffectEnabled = false
+    before()
+    const { updated, val: cleanup } = useEffectSsr(...args)
+    if (updated) useEffectCleanups.push(cleanup)
+    after()
+  }
+
+  Object.defineProperty(_useEffect, 'ssr', {
+    set (v) {
+      useEffectEnabled = !!v
+    }
+  })
+
   function _useMemo (...args) {
     before()
     const result = useMemo(...args)
@@ -205,13 +239,32 @@ function inject () {
     after()
     return result
   }
+
+  function _renderToString (element) {
+    install()
+    const str = renderToString(element)
+    process.nextTick(() => {
+      for (const cleanup of useEffectCleanups) {
+        cleanup()
+      }
+      useEffectCleanups.length = 0
+    })
+    uninstall()
+    return str
+  }
+
+  Object.assign(reactDomServer, {
+    renderToString: _renderToString
+  })
+
   Object.assign(react, {
     useMemo: _useMemo,
     useReducer: _useReducer,
     useRef: _useRef,
     useState: _useState,
     useCallback: _useCallback,
-    useContext: _useContext
+    useContext: _useContext,
+    useEffect: _useEffect
   })
 }
 
